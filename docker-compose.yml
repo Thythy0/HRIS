@@ -1,0 +1,14 @@
+services:
+  frontend:
+    build:
+      context: .
+      target: dev
+    ports:
+      - "${VITE_PORT:-5173}:5173"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    env_file:
+      - .env
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:3000/api}
