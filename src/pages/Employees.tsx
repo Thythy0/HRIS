@@ -5,6 +5,7 @@ import { pushRow } from '../lib/sync';
 import { logAudit } from '../lib/audit';
 import { Eye, Pencil, Archive, Trash2 } from 'lucide-react';
 import Modal from '../components/ui/Modal';
+import { ROLES } from '../lib/permissions';
 
 export default function Employees() {
   const [db, setDb] = useState(getDB());
@@ -15,9 +16,26 @@ export default function Employees() {
     (!q || (e.name ?? '').toLowerCase().includes(q.toLowerCase()) || (e.code ?? '').toLowerCase().includes(q.toLowerCase()) || (e.email ?? '').toLowerCase().includes(q.toLowerCase())) &&
     (!dept || e.dept === +dept) && (!type || e.type === type));
   const refresh = () => setDb({ ...getDB() });
-  const save = (e: any) => {
+  const linkedLogin = (empEmail: string) => getDB().users.find((x: any) => String(x.email || '').toLowerCase() === String(empEmail || '').toLowerCase().trim());
+  const editLogin = edit && edit.id ? linkedLogin(edit.email) : null;
+  const save = (e: any, login?: { email: string; pass: string; role: string }) => {
     if (!e.name) return toast('Name required');
     const d = getDB();
+    const loginEmail = (login?.email || '').trim();
+    const loginEmailLower = loginEmail.toLowerCase();
+    let oldEmailLower = '';
+    if (e.id) {
+      const found = d.employees.find((x: any) => x.id === e.id);
+      if (!found) return toast('Record not found');
+      oldEmailLower = String(found.email || '').toLowerCase();
+    }
+    if (loginEmailLower) {
+      const clash = d.users.find((x: any) => String(x.email || '').toLowerCase() === loginEmailLower && String(x.email || '').toLowerCase() !== oldEmailLower);
+      if (clash) return toast('Login email already used by another user');
+    } else if (!e.id) {
+      return toast('Login email required');
+    }
+    if (!e.id && !login?.pass) return toast('Set a login password');
     let saved: any;
     if (e.id) {
       const found = d.employees.find((x: any) => x.id === e.id);
@@ -32,11 +50,23 @@ export default function Employees() {
     }
     else { saved = { id: Date.now(), code: `EMP-${String(d.employees.length + 1).padStart(3, '0')}`, status: 'Active', dob: '', address: '', salaryType: 'Monthly', schedule: 1, allowances: 0, bank: '', ...e }; d.employees.push(saved); }
     saveDB(d); if (saved) pushRow('employees', saved);
+    if (loginEmailLower) {
+      let u = d.users.find((x: any) => String(x.email || '').toLowerCase() === oldEmailLower && oldEmailLower) || d.users.find((x: any) => String(x.email || '').toLowerCase() === loginEmailLower);
+      if (u) {
+        u.name = saved.name; u.email = loginEmail; u.role = login?.role || u.role;
+        if (login?.pass) u.pass = login.pass;
+      } else {
+        u = { id: Date.now(), name: saved.name, email: loginEmail, role: login?.role || 'Employee', pass: login?.pass || '' };
+        d.users.push(u);
+      }
+      saveDB(d); pushRow('users', u);
+      logAudit('Login account synced', 'Employees', `${saved.code} · ${loginEmail}`, `role=${u.role}`);
+    }
     logAudit(e.id ? 'Employee updated' : 'Employee created', 'Employees', `${saved.code} · ${saved.name}`, `salary=${saved.salary} status=${saved.status}`);
     setEdit(null); refresh(); toast('Employee saved');
   };
   const archive = (e: any) => { const d = getDB(); const x = d.employees.find((y: any) => y.id === e.id); if (!x) return toast('Record not found'); const old = x.status; x.status = x.status === 'Archived' ? 'Active' : 'Archived'; d.statusHistory.push({ id: Date.now(), empId: x.id, date: new Date().toISOString().slice(0, 10), oldStatus: old, newStatus: x.status, reason: 'Archived toggle', by: 'HR' }); saveDB(d); pushRow('employees', x); logAudit(old === 'Archived' ? 'Employee restored' : 'Employee archived', 'Employees', `${x.code} · ${x.name}`); refresh(); toast('Updated'); };
-  const del = (e: any) => { if (!confirm('Delete employee?')) return; const d = getDB(); d.employees = d.employees.filter((y: any) => y.id !== e.id); saveDB(d); logAudit('Employee deleted', 'Employees', `${e.code} · ${e.name}`); refresh(); toast('Deleted'); };
+  const del = (e: any) => { if (!confirm('Delete employee?')) return; const d = getDB(); d.employees = d.employees.filter((y: any) => y.id !== e.id); const mail = String(e.email || '').toLowerCase(); const ui = d.users.findIndex((u: any) => String(u.email || '').toLowerCase() === mail && mail && u.role !== 'Super Admin'); if (ui >= 0) { const [removed] = d.users.splice(ui, 1); logAudit('Login account removed', 'Employees', `${e.code} · ${removed.email}`); } saveDB(d); logAudit('Employee deleted', 'Employees', `${e.code} · ${e.name}`); refresh(); toast('Deleted'); };
 
   return (
     <>
@@ -89,10 +119,18 @@ export default function Employees() {
             <div><label className="flabel">Account number</label><input defaultValue={edit.bankAccount} id="f_bankacc" /></div>
             <div><label className="flabel">Account name</label><input defaultValue={edit.bankAccountName} id="f_bankname" /></div>
             <div><label className="flabel">Emergency contact</label><input defaultValue={edit.emergencyName} id="f_emg" placeholder="Name" /></div>
-            <div className="col-span-2"><label className="flabel">Emergency phone</label><input defaultValue={edit.emergencyPhone} id="f_emgphone" /></div>
+            <div><label className="flabel">Emergency phone</label><input defaultValue={edit.emergencyPhone} id="f_emgphone" /></div>
+            <div className="col-span-2 mt-2 pt-3 border-t border-slate-100">
+              <h4 className="font-bold text-sm">System login</h4>
+              <p className="text-xs text-slate-400 mt-0.5">Account the employee uses to sign in. {edit.id ? 'Leave the password blank to keep the current one.' : 'Required for new employees.'}</p>
+            </div>
+            <div><label className="flabel">Login email</label><input defaultValue={editLogin?.email || edit.email || ''} id="f_login" placeholder="name@company.ph" autoComplete="off" /></div>
+            <div><label className="flabel">Password{edit.id ? ' (blank = keep current)' : ''}</label><input type="password" id="f_pass" placeholder={edit.id ? '••••••' : 'Set password'} autoComplete="new-password" /></div>
+            <div><label className="flabel">System role</label><select defaultValue={editLogin?.role || 'Employee'} id="f_role">{ROLES.map(r => <option key={r}>{r}</option>)}</select></div>
+            <div className="text-xs text-slate-400 self-end">Signed in as {editLogin ? `${editLogin.email} · ${editLogin.role}` : 'no login yet'}</div>
           </div>
           <div className="flex justify-end gap-2 mt-5"><button className="btn btn-outline" onClick={() => setEdit(null)}>Cancel</button>
-            <button className="btn btn-primary" onClick={() => { const v = (id: string) => (document.getElementById(id) as any)?.value; save({ ...edit, name: v('f_name'), email: v('f_email'), personalMobile: v('f_pmobile'), contact: v('f_contact') || v('f_pmobile'), gender: v('f_gender'), civilStatus: v('f_civil'), dept: +v('f_dept'), position: +v('f_pos'), supervisor: v('f_sup') ? +v('f_sup') : null, workLocation: v('f_wloc'), type: v('f_type'), status: v('f_estatus'), salary: +v('f_sal'), payFrequency: v('f_payfreq'), hired: v('f_hired'), regularizationDate: v('f_reg'), sss: v('f_sss'), philhealth: v('f_ph'), pagibig: v('f_pagibig'), tin: v('f_tin'), bank: v('f_bank'), bankAccount: v('f_bankacc'), bankAccountName: v('f_bankname'), emergencyName: v('f_emg'), emergencyPhone: v('f_emgphone') }); }}>Save</button></div>
+            <button className="btn btn-primary" onClick={() => { const v = (id: string) => (document.getElementById(id) as any)?.value; save({ ...edit, name: v('f_name'), email: v('f_email'), personalMobile: v('f_pmobile'), contact: v('f_contact') || v('f_pmobile'), gender: v('f_gender'), civilStatus: v('f_civil'), dept: +v('f_dept'), position: +v('f_pos'), supervisor: v('f_sup') ? +v('f_sup') : null, workLocation: v('f_wloc'), type: v('f_type'), status: v('f_estatus'), salary: +v('f_sal'), payFrequency: v('f_payfreq'), hired: v('f_hired'), regularizationDate: v('f_reg'), sss: v('f_sss'), philhealth: v('f_ph'), pagibig: v('f_pagibig'), tin: v('f_tin'), bank: v('f_bank'), bankAccount: v('f_bankacc'), bankAccountName: v('f_bankname'), emergencyName: v('f_emg'), emergencyPhone: v('f_emgphone') }, { email: v('f_login'), pass: v('f_pass'), role: v('f_role') }); }}>Save</button></div>
         </Modal>
       )}
     </>

@@ -155,7 +155,7 @@ export async function seedDatabase(seed: any) {
 }
 
 /** Fire-and-forget write-through for offline-first pages. */
-export function pushRow(table: 'employees' | 'attendance' | 'leave_requests' | 'overtime_requests' | 'correction_requests' | 'payroll_periods' | 'payroll_records' | 'company' | 'job_openings' | 'applicants' | 'interviews' | 'job_offers' | 'onboarding_templates' | 'onboarding' | 'offboarding' | 'hr_requests' | 'announcements' | 'loans' | 'expenses' | 'employee_documents' | 'goals' | 'reviews' | 'skills' | 'trainings' | 'training_records', row: any) {
+export function pushRow(table: 'employees' | 'users' | 'attendance' | 'leave_requests' | 'overtime_requests' | 'correction_requests' | 'payroll_periods' | 'payroll_records' | 'company' | 'job_openings' | 'applicants' | 'interviews' | 'job_offers' | 'onboarding_templates' | 'onboarding' | 'offboarding' | 'hr_requests' | 'announcements' | 'loans' | 'expenses' | 'employee_documents' | 'goals' | 'reviews' | 'skills' | 'trainings' | 'training_records', row: any) {
   if (!isSupabaseConfigured || !supabase) return;
   const payload = table === 'employees' ? unmapEmployee(row)
     : table === 'attendance' ? unmapAttendance(row)
@@ -181,6 +181,7 @@ export function pushRow(table: 'employees' | 'attendance' | 'leave_requests' | '
     : table === 'skills' ? ({ id: row.id, emp_id: row.empId, skill: row.skill, level: row.level, certified: row.certified })
     : table === 'trainings' ? ({ id: row.id, title: row.title, trainer: row.trainer, dates: row.dates, participants: row.participants ?? [], status: row.status })
     : table === 'training_records' ? ({ id: row.id, program_id: row.programId, emp_id: row.empId, attended: row.attended, certificate: row.certificate, date: row.date })
+    : table === 'users' ? ({ id: row.id, name: row.name, email: row.email, role: row.role, pass: row.pass })
     : unmapLeave(row);
   (supabase as any).from(table).upsert(payload, { onConflict: 'id' }).then(({ error }: any) => {
     if (error) console.warn('[supabase push]', table, error.message);
