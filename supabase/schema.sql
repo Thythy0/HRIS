@@ -36,13 +36,14 @@ create table if not exists leave_types (
   name text not null,
   credits numeric default 0
 );
--- app users (demo password in `pass`; use Supabase Auth + password_hash for prod)
+-- app users (profile only — passwords live in Supabase Auth, linked via auth_uid)
 create table if not exists users (
   id bigint generated always as identity primary key,
   name text not null,
   email text unique not null,
   role text not null,
-  pass text
+  auth_uid uuid unique references auth.users(id),
+  emp_id bigint
 );
 -- employees
 create table if not exists employees (
@@ -155,7 +156,17 @@ create table if not exists company (
   workflows jsonb default '[]'
 );
 
--- Demo RLS: allow anon + authenticated full access (replace with per-role policies for prod)
+-- users.emp_id -> employees(id) (added after employees exists)
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'users_emp_id_fkey') then
+    alter table users add constraint users_emp_id_fkey foreign key (emp_id) references employees(id);
+  end if;
+end $$;
+
+-- RLS is enabled below, but policies are granted by migration_security.sql
+-- (role-based, mirroring src/lib/permissions.ts). Until that migration runs,
+-- the database is intentionally fail-closed: signed-in users can read
+-- nothing and write nothing. Never re-add permissive "demo-all" policies.
 alter table departments enable row level security;
 alter table positions enable row level security;
 alter table schedules enable row level security;
@@ -171,45 +182,4 @@ alter table notifications enable row level security;
 alter table activity enable row level security;
 alter table company enable row level security;
 
-do $$ begin
-  create policy "demo-all" on departments for all to anon, authenticated using (true) with check (true);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  create policy "demo-all" on positions for all to anon, authenticated using (true) with check (true);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  create policy "demo-all" on schedules for all to anon, authenticated using (true) with check (true);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  create policy "demo-all" on holidays for all to anon, authenticated using (true) with check (true);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  create policy "demo-all" on leave_types for all to anon, authenticated using (true) with check (true);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  create policy "demo-all" on users for all to anon, authenticated using (true) with check (true);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  create policy "demo-all" on employees for all to anon, authenticated using (true) with check (true);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  create policy "demo-all" on attendance for all to anon, authenticated using (true) with check (true);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  create policy "demo-all" on leave_requests for all to anon, authenticated using (true) with check (true);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  create policy "demo-all" on payroll_periods for all to anon, authenticated using (true) with check (true);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  create policy "demo-all" on payroll_records for all to anon, authenticated using (true) with check (true);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  create policy "demo-all" on notifications for all to anon, authenticated using (true) with check (true);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  create policy "demo-all" on activity for all to anon, authenticated using (true) with check (true);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  create policy "demo-all" on company for all to anon, authenticated using (true) with check (true);
-exception when duplicate_object then null; end $$;
+-- (policies are created by migration_security.sql — see note above)

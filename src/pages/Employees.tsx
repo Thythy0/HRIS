@@ -3,6 +3,8 @@ import { getDB, saveDB, deptName, posName, fmtDate, peso } from '../data/mock';
 import { Avatar, Badge, exportCSV, toast } from '../components/ui/bits';
 import { pushRow } from '../lib/sync';
 import { logAudit } from '../lib/audit';
+import { provisionLogin, updateLogin, removeLogin } from '../lib/account';
+import { isSupabaseConfigured } from '../lib/supabaseClient';
 import { Eye, Pencil, Archive, Trash2 } from 'lucide-react';
 import Modal from '../components/ui/Modal';
 import { ROLES } from '../lib/permissions';
@@ -18,7 +20,7 @@ export default function Employees() {
   const refresh = () => setDb({ ...getDB() });
   const linkedLogin = (empEmail: string) => getDB().users.find((x: any) => String(x.email || '').toLowerCase() === String(empEmail || '').toLowerCase().trim());
   const editLogin = edit && edit.id ? linkedLogin(edit.email) : null;
-  const save = (e: any, login?: { email: string; pass: string; role: string }) => {
+  const save = async (e: any, login?: { email: string; pass: string; role: string }) => {
     if (!e.name) return toast('Name required');
     const d = getDB();
     const loginEmail = (login?.email || '').trim();
@@ -51,22 +53,46 @@ export default function Employees() {
     else { saved = { id: Date.now(), code: `EMP-${String(d.employees.length + 1).padStart(3, '0')}`, status: 'Active', dob: '', address: '', salaryType: 'Monthly', schedule: 1, allowances: 0, bank: '', ...e }; d.employees.push(saved); }
     saveDB(d); if (saved) pushRow('employees', saved);
     if (loginEmailLower) {
-      let u = d.users.find((x: any) => String(x.email || '').toLowerCase() === oldEmailLower && oldEmailLower) || d.users.find((x: any) => String(x.email || '').toLowerCase() === loginEmailLower);
-      if (u) {
-        u.name = saved.name; u.email = loginEmail; u.role = login?.role || u.role;
-        if (login?.pass) u.pass = login.pass;
+      const existing = d.users.find((x: any) => String(x.email || '').toLowerCase() === oldEmailLower && oldEmailLower) || d.users.find((x: any) => String(x.email || '').toLowerCase() === loginEmailLower);
+      if (isSupabaseConfigured) {
+        // Real auth: provision / update the login through the admin-users Edge
+        // Function. Passwords are set in Supabase Auth, never stored locally.
+        try {
+          const account = existing
+            ? await updateLogin({ currentEmail: String(existing.email), email: loginEmail, name: saved.name, role: login?.role || existing.role, password: login?.pass || undefined, empId: saved.id })
+            : await provisionLogin({ email: loginEmail, password: login?.pass || '', name: saved.name, role: login?.role || 'Employee', empId: saved.id });
+          if (account) {
+            const local = { id: account.id, name: account.name, email: account.email, role: account.role, authUid: account.auth_uid, empId: account.emp_id };
+            if (existing && existing.id !== account.id) {
+              const oldIdx = d.users.findIndex((x: any) => x.id === existing.id);
+              if (oldIdx >= 0) d.users.splice(oldIdx, 1);
+            }
+            const idx = d.users.findIndex((x: any) => x.id === account.id);
+            if (idx >= 0) d.users[idx] = local; else d.users.push(local);
+            saveDB(d); pushRow('users', local);
+            logAudit('Login account synced', 'Employees', `${saved.code} · ${loginEmail}`, `role=${local.role}`);
+          }
+        } catch (err: any) {
+          // Keep the employee record; report the account sync failure
+          toast(`Employee saved — login sync failed: ${err.message}`);
+        }
       } else {
-        u = { id: Date.now(), name: saved.name, email: loginEmail, role: login?.role || 'Employee', pass: login?.pass || '' };
-        d.users.push(u);
+        // Offline demo mode (no Supabase): local-only login record
+        if (existing) {
+          existing.name = saved.name; existing.email = loginEmail; existing.role = login?.role || existing.role;
+          if (login?.pass) existing.pass = login.pass;
+        } else {
+          d.users.push({ id: Date.now(), name: saved.name, email: loginEmail, role: login?.role || 'Employee', pass: login?.pass || '' });
+        }
+        saveDB(d);
+        logAudit('Login account synced', 'Employees', `${saved.code} · ${loginEmail}`, `role=${login?.role || 'Employee'}`);
       }
-      saveDB(d); pushRow('users', u);
-      logAudit('Login account synced', 'Employees', `${saved.code} · ${loginEmail}`, `role=${u.role}`);
     }
     logAudit(e.id ? 'Employee updated' : 'Employee created', 'Employees', `${saved.code} · ${saved.name}`, `salary=${saved.salary} status=${saved.status}`);
     setEdit(null); refresh(); toast('Employee saved');
   };
   const archive = (e: any) => { const d = getDB(); const x = d.employees.find((y: any) => y.id === e.id); if (!x) return toast('Record not found'); const old = x.status; x.status = x.status === 'Archived' ? 'Active' : 'Archived'; d.statusHistory.push({ id: Date.now(), empId: x.id, date: new Date().toISOString().slice(0, 10), oldStatus: old, newStatus: x.status, reason: 'Archived toggle', by: 'HR' }); saveDB(d); pushRow('employees', x); logAudit(old === 'Archived' ? 'Employee restored' : 'Employee archived', 'Employees', `${x.code} · ${x.name}`); refresh(); toast('Updated'); };
-  const del = (e: any) => { if (!confirm('Delete employee?')) return; const d = getDB(); d.employees = d.employees.filter((y: any) => y.id !== e.id); const mail = String(e.email || '').toLowerCase(); const ui = d.users.findIndex((u: any) => String(u.email || '').toLowerCase() === mail && mail && u.role !== 'Super Admin'); if (ui >= 0) { const [removed] = d.users.splice(ui, 1); logAudit('Login account removed', 'Employees', `${e.code} · ${removed.email}`); } saveDB(d); logAudit('Employee deleted', 'Employees', `${e.code} · ${e.name}`); refresh(); toast('Deleted'); };
+  const del = async (e: any) => { if (!confirm('Delete employee?')) return; const d = getDB(); d.employees = d.employees.filter((y: any) => y.id !== e.id); const mail = String(e.email || '').toLowerCase(); const ui = d.users.findIndex((u: any) => String(u.email || '').toLowerCase() === mail && mail && u.role !== 'Super Admin'); if (ui >= 0) { const [removed] = d.users.splice(ui, 1); if (isSupabaseConfigured && removed.authUid) { try { await removeLogin(removed.email); } catch (err: any) { toast(`Login removal failed: ${err.message}`); } } logAudit('Login account removed', 'Employees', `${e.code} · ${removed.email}`); } saveDB(d); logAudit('Employee deleted', 'Employees', `${e.code} · ${e.name}`); refresh(); toast('Deleted'); };
 
   return (
     <>

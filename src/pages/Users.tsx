@@ -4,6 +4,8 @@ import { toast } from '../components/ui/bits';
 import { useAuth } from '../context/AuthContext';
 import { ROLES, MODULES, ACTIONS, can, roleSummary } from '../lib/permissions';
 import { logAudit } from '../lib/audit';
+import { updateLogin } from '../lib/account';
+import { isSupabaseConfigured } from '../lib/supabaseClient';
 
 export default function Users() {
   const { user } = useAuth();
@@ -11,7 +13,7 @@ export default function Users() {
   const refresh = () => setDb({ ...getDB() });
   const isAdmin = user?.role === 'Super Admin';
 
-  const setRole = (id: number, role: string) => {
+  const setRole = async (id: number, role: string) => {
     if (!isAdmin) return toast('Only Super Admin can change roles');
     const d = getDB();
     const u = d.users.find((x: any) => x.id === id);
@@ -19,6 +21,14 @@ export default function Users() {
     const old = u.role;
     u.role = role;
     saveDB(d); refresh();
+    if (isSupabaseConfigured) {
+      try {
+        const account = await updateLogin({ currentEmail: u.email, role });
+        if (account && account.id === u.id) { u.role = account.role; saveDB(d); refresh(); }
+      } catch (e: any) {
+        toast(`Role saved locally — sync failed: ${e.message}`);
+      }
+    }
     logAudit('User role changed', 'Users', u.email, `${old} → ${role}`);
     toast(`Role updated to ${role}`);
   };

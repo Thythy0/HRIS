@@ -71,7 +71,7 @@ export async function pullDatabase() {
     schedules: (sch.data ?? []).map(mapSchedule),
     holidays: hol.data ?? [],
     leaveTypes: lt.data ?? [],
-    users: (usr.data ?? []).map((u: any) => ({ id: u.id, name: u.name, email: u.email, role: u.role, pass: u.pass ?? '' })),
+    users: (usr.data ?? []).map((u: any) => ({ id: u.id, name: u.name, email: u.email, role: u.role, authUid: u.auth_uid ?? null, empId: u.emp_id ?? null })),
     employees: (emp.data ?? []).map(mapEmployee),
     attendance: (att.data ?? []).map(mapAttendance),
     leaveRequests: (lv.data ?? []).map(mapLeave),
@@ -119,7 +119,7 @@ export async function seedDatabase(seed: any) {
   await upsert('schedules', (seed.schedules ?? []).map((s: any) => ({ id: s.id, name: s.name, days: s.days, time_from: s.from, time_to: s.to, break_time: s.break, schedule_type: s.type, rest_day: s.restDay })));
   await upsert('holidays', (seed.holidays ?? []).map((h: any) => ({ id: h.id, name: h.name, date: h.date, type: h.type })));
   await upsert('leave_types', (seed.leaveTypes ?? []).map((t: any) => ({ id: t.id, name: t.name, credits: t.credits })));
-  await upsert('users', (seed.users ?? []).map((u: any) => ({ id: u.id, name: u.name, email: u.email, role: u.role, pass: u.pass })));
+  await upsert('users', (seed.users ?? []).map((u: any) => ({ id: u.id, name: u.name, email: u.email, role: u.role })));
   await upsert('employees', (seed.employees ?? []).map(unmapEmployee));
   await upsert('payroll_periods', (seed.payrollPeriods ?? []).map((p: any) => ({ id: p.id, label: p.label, date_from: p.from, date_to: p.to, status: p.status, stage: p.stage ?? 0, history: p.history ?? [] })));
   if (seed.company) {
@@ -181,7 +181,7 @@ export function pushRow(table: 'employees' | 'users' | 'attendance' | 'leave_req
     : table === 'skills' ? ({ id: row.id, emp_id: row.empId, skill: row.skill, level: row.level, certified: row.certified })
     : table === 'trainings' ? ({ id: row.id, title: row.title, trainer: row.trainer, dates: row.dates, participants: row.participants ?? [], status: row.status })
     : table === 'training_records' ? ({ id: row.id, program_id: row.programId, emp_id: row.empId, attended: row.attended, certificate: row.certificate, date: row.date })
-    : table === 'users' ? ({ id: row.id, name: row.name, email: row.email, role: row.role, pass: row.pass })
+    : table === 'users' ? ({ id: row.id, name: row.name, email: row.email, role: row.role, auth_uid: row.authUid ?? null, emp_id: row.empId ?? null })
     : unmapLeave(row);
   (supabase as any).from(table).upsert(payload, { onConflict: 'id' }).then(({ error }: any) => {
     if (error) console.warn('[supabase push]', table, error.message);

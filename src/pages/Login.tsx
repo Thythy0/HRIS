@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
 import { toast } from '../components/ui/bits';
-import { getDB } from '../data/mock';
+import { sendPasswordReset } from '../lib/account';
+import { isSupabaseConfigured } from '../lib/supabaseClient';
 
 export default function Login() {
   const [tab, setTab] = useState<'login' | 'register' | 'forgot'>('login');
   const [email, setEmail] = useState('admin@sunrisedigital.ph');
   const [pass, setPass] = useState('admin123');
+  const [forgotEmail, setForgotEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const { login, user } = useAuth();
   const navigate = useNavigate();
@@ -18,13 +20,22 @@ export default function Login() {
   }, [user]);
 
   const doLogin = async () => {
-    const em = email.trim();
-    if (await login(em, pass)) {
+    const u = await login(email.trim(), pass);
+    if (u) {
       setLoading(true);
-      const role = getDB().users.find((u: any) => String(u.email).toLowerCase() === em.toLowerCase() && u.pass === pass)?.role;
-      setTimeout(() => navigate(role === 'Employee' ? '/self-service' : '/dashboard', { replace: true }), 1200);
+      setTimeout(() => navigate(u.role === 'Employee' ? '/self-service' : '/dashboard', { replace: true }), 1200);
     } else {
       toast('Invalid credentials');
+    }
+  };
+
+  const doForgot = async () => {
+    if (!forgotEmail.trim()) return toast('Enter your work email');
+    try {
+      await sendPasswordReset(forgotEmail.trim());
+      toast('Reset link sent — check your email');
+    } catch (e: any) {
+      toast(isSupabaseConfigured ? (e.message || 'Could not send reset link') : 'Password reset needs Supabase to be configured');
     }
   };
 
@@ -103,13 +114,13 @@ export default function Login() {
               <label className="flabel">Company name</label><input className="mb-4" placeholder="Your Company Inc." />
               <label className="flabel">Work email</label><input className="mb-4" placeholder="you@company.com" />
               <label className="flabel">Password</label><input type="password" className="mb-5" placeholder="••••••••" />
-              <button className="btn btn-primary w-full !py-3 text-sm" onClick={() => toast('Verification email sent — check your inbox')}>Create workspace</button>
+              <button type="button" className="btn btn-primary w-full !py-3 text-sm" onClick={() => toast('Workspaces are provisioned by HR — ask your admin to add you from the Employees page')}>Create workspace</button>
             </>
           )}
           {tab === 'forgot' && (
             <>
-              <label className="flabel">Work email</label><input className="mb-5" placeholder="you@company.com" />
-              <button className="btn btn-primary w-full !py-3 text-sm" onClick={() => toast('Reset link sent. Check your email.')}>Send reset link</button>
+              <label className="flabel">Work email</label><input className="mb-5" placeholder="you@company.com" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} />
+              <button type="button" className="btn btn-primary w-full !py-3 text-sm" onClick={doForgot}>Send reset link</button>
             </>
           )}
           </motion.div>
